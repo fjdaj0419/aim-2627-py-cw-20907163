@@ -35,37 +35,50 @@ class Facing(Enum):
 # Q1 机器人自检（题面 Q1·自检状态计算与报告生成）
 # ---------------------------------------------------------------------------
 def hp_ratio(hp, max_hp):
-    """TODO(Q1)：血量百分比，返回 0-100 的 int；计算与边界规则见题面 Q1 规范。"""
+    """血量百分比，返回 0-100 的 int。
+
+    规则：
+    - hp < 0 时返回 0（负血量截断）
+    - hp > max_hp 时返回 100（超量截断）
+    - 否则返回 int(hp / max_hp * 100)，向下取整
+    """
     if hp < 0:
         return 0
     if hp > max_hp:
         return 100
     return int(hp / max_hp * 100)
-    raise NotImplementedError("Q1 hp_ratio：题面 Q1·血量百分比与精度保障")
 
 
 def status_report(name, robot_type, hp, max_hp, battery):
-    """TODO(Q1)：一行自检报告字符串；档位判定与逐字符格式见题面 Q1 规范。"""
-    #电量修正
+    """生成一行自检报告字符串。
+
+    格式：{name:<10}|{robot_type:^10}|HP {百分比:>3}%|BAT {电量:>3}%|{档位}
+    - 名称左对齐占 10 字符
+    - 机型居中占 10 字符
+    - 血量百分比右对齐占 3 字符
+    - 电量百分比右对齐占 3 字符
+    - 档位：OK (≥75) / WARNING (≥30) / LOW (<30)
+    """
+    # 电量修正：截断到 0-100 范围
     def battery_fix(battery):
         if battery < 0:
             return 0
         if battery > 100:
             return 100
-        raise NotImplementedError()
-    
-    hp_ratio = hp_ratio(hp)
+        return battery
+
+    hp_pct = hp_ratio(hp, max_hp)
     battery_ratio = battery_fix(int(battery))
-    
-    if battery_ratio >= 80:
+
+    # 电量档位判定
+    if battery_ratio >= 75:
         battery_status = "OK"
-    elif battery_ratio >= 40:
+    elif battery_ratio >= 30:
         battery_status = "WARNING"
     else:
         battery_status = "LOW"
-    return f"{name:<10}|{robot_type:^10}|HP {hp_ratio:>3}%|BAT {battery_ratio:>3}%|{battery_status}"
 
-    #raise NotImplementedError("Q1 status_report：题面 Q1·电量映射与报告格式")
+    return f"{name:<10}|{robot_type:^10}|HP {hp_pct:>3}%|BAT {battery_ratio:>3}%|{battery_status}"
 
 
 # ---------------------------------------------------------------------------
