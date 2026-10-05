@@ -46,16 +46,149 @@ def hp_ratio(hp, max_hp):
 
 def status_report(name, robot_type, hp, max_hp, battery):
     """TODO(Q1)：一行自检报告字符串；档位判定与逐字符格式见题面 Q1 规范。"""
-    raise NotImplementedError("Q1 status_report：题面 Q1·电量映射与报告格式")
+    #电量修正
+    def battery_fix(battery):
+        if battery < 0:
+            return 0
+        if battery > 100:
+            return 100
+        raise NotImplementedError()
+    
+    hp_ratio = hp_ratio(hp)
+    battery_ratio = battery_fix(int(battery))
+    
+    if battery_ratio >= 80:
+        battery_status = "OK"
+    elif battery_ratio >= 40:
+        battery_status = "WARNING"
+    else:
+        battery_status = "LOW"
+    return f"{name:<10}|{robot_type:^10}|HP {hp_ratio:>3}%|BAT {battery_ratio:>3}%|{battery_status}"
+
+    #raise NotImplementedError("Q1 status_report：题面 Q1·电量映射与报告格式")
 
 
 # ---------------------------------------------------------------------------
 # Q2 战斗日志分析（题面 Q2·多源日志解析与统计）
 # ---------------------------------------------------------------------------
 def analyze_damage_log(lines):
-    """TODO(Q2)：解析混合格式伤害日志，返回固定契约的统计 dict；
-    行格式、去重与统计口径见题面 Q2 规范。"""
-    raise NotImplementedError("Q2 analyze_damage_log：题面 Q2·多源日志解析与统计")
+    """解析混合格式伤害日志，返回固定契约的统计 dict。
+
+    支持两种有效行：
+      - 传感器行: "F:32,L:5,R:12"  (F→front, L→left, R→right，段可缺失)
+      - JSON 行:  '{"armor":"front","damage":30,"id":7}'  (id 可选)
+    其余行（空行 / #注释 / 格式非法）一律跳过，全程不抛异常。
+    """
+    # ---- 统计变量初始化 ----
+    total = 0                          # 有效事件伤害总和
+    by_armor = {"front": 0, "left": 0, "right": 0}  # 三部位桶，恒存在
+    event_count = 0                    # 有效事件计数（用于算 avg）
+    seen_ids = set()                   # 已出现的 JSON id，用于去重
+
+    # 传感器字母 → 部位名映射
+    SENSOR_MAP = {"F": "front", "L": "left", "R": "right"}
+
+    for line in lines:
+        try:
+            stripped = line.strip()
+
+            # ---- 跳过空行和 # 注释 ----
+            if stripped == "" or stripped.startswith("#"):
+                continue
+
+            # ============================================================
+            # 尝试 JSON 行解析
+            # ============================================================
+            if stripped.startswith("{"):
+                data = json.loads(stripped)          # 非法 JSON → except 跳过
+
+                # 校验 armor：必须是三部位之一
+                armor = data.get("armor")
+                if armor not in ("front", "left", "right"):
+                    continue
+
+                # 校验 damage：必须是严格正整数（排除 bool / float / 0 / 负数）
+                damage = data.get("damage")
+                if isinstance(damage, bool) or not isinstance(damage, int) or damage <= 0:
+                    continue
+
+                # id 去重：有 id 且重复 → 跳过；首次出现 → 记录
+                if "id" in data:
+                    eid = data["id"]
+                    if eid in seen_ids:
+                        continue
+                    seen_ids.add(eid)
+
+                # 计入统计
+                total = total + damage
+                # 记录每一个部位的伤害值
+                by_armor[armor] += damage# 记录每一个部位的伤害值
+                event_count += 1
+
+            # ============================================================
+            # 尝试传感器行解析: "F:32,L:5,R:12"
+            # ============================================================
+            else:
+                segments = stripped.split(",")
+                events = []               # 本行解析出的 (armor, damage) 列表
+                valid = True
+
+                for seg in segments:
+                    seg = seg.strip()
+                    # 每段必须恰好含一个 ':'
+                    if ":" not in seg:
+                        valid = False
+                        break
+                    parts = seg.split(":")
+                    if len(parts) != 2:
+                        valid = False
+                        break
+
+                    letter, val_str = parts[0].strip(), parts[1].strip()
+
+                    # 字母必须是 F / L / R 之一
+                    if letter not in SENSOR_MAP:
+                        valid = False
+                        break
+
+                    # 值必须是正整数（> 0）
+                    try:
+                        val = int(val_str)
+                    except ValueError:
+                        valid = False
+                        break
+                    if val <= 0:
+                        valid = False
+                        break
+
+                    events.append((SENSOR_MAP[letter], val))
+
+                # 全部段合法 且 至少有一段 → 计入统计
+                if valid and events:
+                    for armor, damage in events:
+                        total += damage
+                        by_armor[armor] += damage
+                        event_count += 1
+
+        except Exception:
+            # 任何未预料的异常 → 当脏行跳过，绝不向外抛出
+            continue
+
+    # ---- 计算 most_hit 和 avg ----
+    if event_count == 0:
+        most_hit = None
+        avg = 0.0
+    else:
+        # 受击伤害最大的部位（dict 插入序固定，max 返回第一个最大值）
+        most_hit = max(by_armor, key=lambda k: by_armor[k])
+        avg = round(total / event_count, 2)
+
+    return {
+        "total": total,
+        "by_armor": by_armor,
+        "most_hit": most_hit,
+        "avg": avg,
+    }
 
 
 # ---------------------------------------------------------------------------
