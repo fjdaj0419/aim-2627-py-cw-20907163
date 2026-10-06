@@ -290,21 +290,64 @@ class SentryGrid:
 
     @current_pos.setter
     def current_pos(self, value):
-        """TODO(Q3)：位置 setter；三重输入校验见题面 Q3 规范第 1 条。"""
-        raise NotImplementedError("Q3 current_pos.setter：题面 Q3·位置校验三步")
+        """位置 setter：三重输入校验。"""
+        # 第一步：类型校验——只接受 tuple 或 list
+        if not isinstance(value, (tuple, list)):
+            raise TypeError("current_pos 必须是 tuple 或 list")
+        # 第二步：长度校验——必须恰好包含 2 个元素
+        if len(value) != 2:
+            raise TypeError("current_pos 必须是长度为 2 的 tuple 或 list")
+        # 第三步：元素规范化——转为 int 并夹回地图范围，最后存为 tuple
+        self._pos = self._clamp_cell(value)
 
     def move_forward(self):
-        """TODO(Q3)：朝当前 facing 前进一格，返回执行后的位置；
-        碰撞、耗电与断电语义见题面 Q3 规范。"""
-        raise NotImplementedError("Q3 move_forward：题面 Q3·前进、碰撞与断电")
+        """朝当前 facing 前进一格，返回执行后的位置。"""
+        # 检查电量：≤ 0 时底盘断电，不产生位移
+        if self._fuel <= 0:
+            return self._pos
+        # 计算前方格子坐标：当前坐标 + 朝向的单位位移向量
+        dx, dy = self._facing.delta
+        next_x = self._pos[0] + dx
+        next_y = self._pos[1] + dy
+        # 判断前方格子是否为障碍或越界
+        if self.is_blocked(next_x, next_y):
+            # 碰撞：位置不变、朝向不变、碰撞计数加 1
+            self._collision_count += 1
+        else:
+            # 可通行：移动到前方格子
+            self._pos = (next_x, next_y)
+        # 前进消耗 1 单位电量（无论是否碰撞）
+        self._fuel -= 1
+        # 返回执行后的当前位置
+        return self._pos
 
     def turn_left(self):
-        """TODO(Q3)：原地左转 90°，返回新的 Facing（不耗电）。"""
-        raise NotImplementedError("Q3 turn_left")
+        """原地左转 90°（逆时针），返回新的 Facing。"""
+        # 定义左转映射：当前朝向 → 左转后的朝向
+        left_map = {
+            Facing.UP: Facing.LEFT,    # 上 → 左
+            Facing.LEFT: Facing.DOWN,  # 左 → 下
+            Facing.DOWN: Facing.RIGHT, # 下 → 右
+            Facing.RIGHT: Facing.UP,   # 右 → 上
+        }
+        # 更新朝向
+        self._facing = left_map[self._facing]
+        # 返回新的朝向
+        return self._facing
 
     def turn_right(self):
-        """TODO(Q3)：原地右转 90°，返回新的 Facing（不耗电）。"""
-        raise NotImplementedError("Q3 turn_right")
+        """原地右转 90°（顺时针），返回新的 Facing。"""
+        # 定义右转映射：当前朝向 → 右转后的朝向
+        right_map = {
+            Facing.UP: Facing.RIGHT,    # 上 → 右
+            Facing.RIGHT: Facing.DOWN,  # 右 → 下
+            Facing.DOWN: Facing.LEFT,   # 下 → 左
+            Facing.LEFT: Facing.UP,     # 左 → 上
+        }
+        # 更新朝向
+        self._facing = right_map[self._facing]
+        # 返回新的朝向
+        return self._facing
 
 
 # ---------------------------------------------------------------------------
