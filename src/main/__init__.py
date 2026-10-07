@@ -354,9 +354,76 @@ class SentryGrid:
 # Q4 贪心导航（题面 Q4·单步贪心导航策略）
 # ---------------------------------------------------------------------------
 def next_step_toward(pos, target, obstacles, current_facing=Facing.UP):
-    """TODO(Q4)：返回下一步应朝向的 Facing；
-    候选判定、优先级与回退规则见题面 Q4 规范。"""
-    raise NotImplementedError("Q4 next_step_toward：题面 Q4·贪心策略与回退")
+    """贪心导航：返回下一步应朝向的 Facing（题面 Q4 规范 1-3）。
+
+    核心思想：只在"能让曼哈顿距离严格变小"的方向里挑一个走。
+    规则回顾：
+      1. 候选方向 = 四邻域中，相邻格不是障碍 **且** 移动后到目标曼哈顿
+         距离严格变小的方向（持平不算候选）。
+      2. 有多个候选时，先走与目标绝对坐标差较大的那条轴。
+      3. 一个候选都没有时，原地保持 current_facing。
+      4. 不管地图边界（越界由 SentryGrid.move_forward 处理）。
+    """
+    # ---- 第 0 步：拆坐标，算出当前位置到目标的曼哈顿距离 ----
+    x, y = int(pos[0]), int(pos[1])       # 当前位置
+    tx, ty = int(target[0]), int(target[1])  # 目标位置
+    cur_dist = abs(x - tx) + abs(y - ty)  # 当前曼哈顿距离（基准值）
+
+    # ---- 第 1 步：枚举四邻域，收集所有合法候选方向 ----
+    candidates = []                       # 存本步可选的 Facing
+    for f in Facing:                      # 遍历 UP / DOWN / LEFT / RIGHT
+        dx, dy = f.delta                  # 该朝向的单位位移 (dx, dy)
+        nx, ny = x + dx, y + dy           # 走一步后的相邻格坐标
+        # 条件 A：相邻格不是障碍（注意：这里不判断是否越界，见规范 4）
+        if (nx, ny) in obstacles:
+            continue
+        # 条件 B：移动后到目标的曼哈顿距离要"严格变小"
+        new_dist = abs(nx - tx) + abs(ny - ty)
+        if new_dist < cur_dist:           # 持平（==）不算候选
+            candidates.append(f)
+
+    # ---- 第 2 步：没有候选 → 回退为保持当前朝向（规范 3）----
+    if not candidates:
+        return current_facing
+
+    # 只有一个候选，直接走它
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # ---- 第 3 步：多个候选 → 平局打破（规范 2）----
+    # 关键事实：每个轴（x / y）上至多只有一个方向能"严格减小距离"
+    #   （朝目标去的那一侧减小，背目标的那一侧增大），
+    # 所以两个候选必然一横一纵，最多就这两个。
+    dx_abs = abs(x - tx)                  # 目标在 x 轴上的绝对坐标差
+    dy_abs = abs(y - ty)                  # 目标在 y 轴上的绝对坐标差
+
+    # 各轴上"朝目标"的那个方向；若该轴差为 0 则该轴没有方向，记为 None
+    if tx > x:                   # 目标在右边
+        x_dir = Facing.RIGHT
+    elif tx < x:                 # 目标在左边
+        x_dir = Facing.LEFT
+    else:                        # 已在同一列，x 轴没有可走方向
+        x_dir = None
+
+    if ty > y:                   # 目标在上边
+        y_dir = Facing.UP
+    elif ty < y:                 # 目标在下边
+        y_dir = Facing.DOWN
+    else:                        # 已在同一行，y 轴没有可走方向
+        y_dir = None
+
+    # 谁的绝对坐标差大就先走谁的轴；相等时（本题取"保守自洽"的约定）先走 x 轴
+    if dx_abs >= dy_abs:
+        preferred, fallback = x_dir, y_dir
+    else:
+        preferred, fallback = y_dir, x_dir
+
+    # 优先轴方向若是候选就走它；否则退回另一轴；再不行取枚举到的第一个
+    if preferred in candidates:
+        return preferred
+    if fallback in candidates:
+        return fallback
+    return candidates[0]
 
 
 # ---------------------------------------------------------------------------
@@ -373,9 +440,148 @@ class SentryState(Enum):
 
 
 def decide(sensor, state, hp, heat):
-    """TODO(Q5)：纯函数决策，返回 (action: str, new_state: SentryState)；
-    sensor 字段契约、R1-R7 规则表与非法输入处理见题面 Q5 规范。"""
-    raise NotImplementedError("Q5 decide：题面 Q5·决策规则表 R1-R7")
+    """纯函数决策：读感知/状态/血量/热量，返回 (action, new_state)。
+
+    求值方式：严格按 R1→R7 顺序逐条判断，**首条命中立刻返回，永不例外**。
+    因此规则之间天然互斥、覆盖完备，任一合法输入恰好命中一条。
+
+    参数
+    ----
+    sensor : dict  形如
+        {"enemy_frames": (True, False, True),  # 敌检历史，末位=当前帧，长 1-6
+         "enemy_dist":   3,                     # 敌距，int 或 None
+         "robot_type":   "INFANTRY",            # "INFANTRY" 或 "HERO"
+         "max_hp":       120}
+    state  : SentryState  当前状态机状态
+    hp     : int          当前血量（与 max_hp 一起换算成 hp_pct）
+    heat   : 当前热量；R1-R7 的规则表暂不使用，仅为接口预留
+
+    raise ValueError 的三种"契约外"输入：
+      1) enemy_frames 是空序列，或长度 > 6；
+      2) state 不是 SentryState 的五个成员之一；
+      3) sensor 缺少四个字段中的任意一个。
+    注意：字段**存在但取值非法**（如 enemy_dist="far"）不算契约外，
+    要按防御式方式归一化，不抛异常。
+    """
+    # =====================================================================
+    # 0. 契约外校验：只针对"形状"层面的非法，命中即 raise ValueError
+    # =====================================================================
+    if not isinstance(sensor, dict):
+        # 连 dict 都不是 → 必然缺字段，按契约外处理
+        raise ValueError("sensor 必须是 dict")
+    for key in ("enemy_frames", "enemy_dist", "robot_type", "max_hp"):
+        if key not in sensor:                      # 第 3 种：缺字段
+            raise ValueError("sensor 缺少必需字段: " + key)
+
+    if not isinstance(state, SentryState):         # 第 2 种：非法 state
+        raise ValueError("state 必须是 SentryState 成员")
+
+    frames_raw = sensor["enemy_frames"]
+    # 只接受 tuple / list（题面明示）；空 或 长度>6 属契约外
+    if not isinstance(frames_raw, (tuple, list)):
+        raise ValueError("enemy_frames 必须是 tuple 或 list")
+    if len(frames_raw) == 0 or len(frames_raw) > 6:  # 第 1 种：空 / 超长
+        raise ValueError("enemy_frames 长度必须在 1-6")
+
+    # =====================================================================
+    # 1. 防御式规范化：字段存在但取值非法 → 归一化，绝不抛异常
+    # =====================================================================
+    # enemy_frames：元素一律"按真值解释"（非布尔值也可以，如 1/0/""/None）
+    frames = tuple(bool(f) for f in frames_raw)
+    visible = frames[-1]                 # 术语"可见" = 当前帧（末位）为真
+
+    # enemy_dist：契约是 int 或 None；非数值一律归一为 None（视为"未知/远"）
+    dist_raw = sensor["enemy_dist"]
+    if dist_raw is None or isinstance(dist_raw, bool):
+        # bool 是 int 的子类，但语义上不是"距离"，一并归一为 None
+        enemy_dist = None
+    elif isinstance(dist_raw, int):
+        enemy_dist = dist_raw
+    elif isinstance(dist_raw, float):
+        enemy_dist = int(dist_raw)       # 浮点距离截断成整数
+    else:
+        try:                             # 形如 "3" 的数字字符串也接受
+            enemy_dist = int(str(dist_raw).strip())
+        except (TypeError, ValueError):
+            enemy_dist = None            # 形如 "far" → 未知
+
+    # robot_type：契约是 "INFANTRY" / "HERO"；其余（含大小写/非字符串）
+    # 一律按"步兵"处理——因为规则里只有 HERO 是特殊分支，非 HERO 都归步兵
+    type_raw = sensor["robot_type"]
+    is_hero = (isinstance(type_raw, str)
+               and type_raw.strip().upper() == "HERO")
+
+    # hp_pct：0-100 的整数。转不成 int 就取安全默认值，绝不抛异常
+    def to_int(value, default):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    max_hp_i = to_int(sensor["max_hp"], 100)   # 满血非法 → 默认 100
+    hp_i = to_int(hp, 0)                       # 血量非法 → 默认 0
+
+    if max_hp_i > 0:
+        # 正常情况：复用 Q1 的 hp_ratio（负血截 0、超量截 100）
+        hp_pct = hp_ratio(hp_i, max_hp_i)
+    else:
+        # 满血非法（会除零）：有血视为满血，无血视为 0
+        hp_pct = 100 if hp_i > 0 else 0
+
+    # 交火分支的公共判定：敌距 <= 3 为"贴身"，可直接开火；
+    # 敌距为 None（未知）时不算贴身，走"侧移逼近"分支
+    close_range = (enemy_dist is not None and enemy_dist <= 3)
+
+    def engage_action():
+        """R4 与 R6 中"贴身/远距"两分支完全一致，抽出来复用。"""
+        if close_range:
+            return "SHOOT"                       # 敌距 <= 3：开火
+        # 敌距 > 3：HERO 往右、步兵往左包抄
+        return "MOVE_RIGHT" if is_hero else "MOVE_LEFT"
+
+    # =====================================================================
+    # 2. 按 R1 → R7 顺序求值，首条命中即 return
+    # =====================================================================
+    # --- R1 保命优先：血量不足三成，无条件撤退（压过一切，包括贴脸交火）---
+    if hp_pct <= 30:
+        return ("RETREAT", SentryState.RETREAT)
+
+    # --- R2 撤退保持：已在撤退中 ---
+    if state == SentryState.RETREAT:
+        # 注意：R1 已经拦下所有 hp_pct<=30，走到这里必然 hp_pct>30，
+        # 即"已恢复到安全血量"，于是转出撤退进入 RETURN。
+        # （else 分支在逻辑上不可达，仍保留以忠实还原规则表原意）
+        if hp_pct > 30:
+            return ("RETURN", SentryState.RETURN)
+        return ("RETREAT", SentryState.RETREAT)
+
+    # --- R3 返航单帧：RETURN 是单帧过渡态，与可见性/敌距/热量无关 ---
+    if state == SentryState.RETURN:
+        return ("MOVE_BASE", SentryState.PATROL)
+
+    # --- R4 / R5：state == ENGAGE，只看"这一帧有没有看见" ---
+    if state == SentryState.ENGAGE:
+        # R4 看得见 → 按距离/机型出手，保持 ENGAGE
+        if visible:
+            return (engage_action(), SentryState.ENGAGE)
+        # R5 看不见 → 连续两帧丢失才放弃(SCAN)，只丢当前帧则待命
+        # （当前帧必为假，所以"连续丢失"等价于前一帧也为假）
+        if len(frames) >= 2 and not frames[-2]:
+            return ("SCAN", SentryState.SUSPECT)
+        return ("HOLD_FIRE", SentryState.ENGAGE)
+
+    # --- R6 / R7：此处 state 只剩 PATROL / SUSPECT ---
+    if visible:
+        # R6 看得见 → 连续两帧为真才算真敌情，否则当噪声(SCAN)
+        # （外层已保证 frames[-1] 为真，故只需再确认前一帧）
+        if len(frames) >= 2 and frames[-2]:
+            return (engage_action(), SentryState.ENGAGE)
+        return ("SCAN", SentryState.SUSPECT)
+
+    # R7 看不见 → PATROL 继续巡逻，SUSPECT 继续扫描
+    if state == SentryState.PATROL:
+        return ("PATROL_MOVE", SentryState.PATROL)
+    return ("SCAN", SentryState.SUSPECT)
 
 
 # ---------------------------------------------------------------------------
