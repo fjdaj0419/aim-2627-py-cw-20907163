@@ -463,34 +463,30 @@ def decide(sensor, state, hp, heat):
     注意：字段**存在但取值非法**（如 enemy_dist="far"）不算契约外，
     要按防御式方式归一化，不抛异常。
     """
-    # =====================================================================
-    # 0. 契约外校验：只针对"形状"层面的非法，命中即 raise ValueError
-    # =====================================================================
+    # sensor形式及其内容是否合法
     if not isinstance(sensor, dict):
-        # 连 dict 都不是 → 必然缺字段，按契约外处理
         raise ValueError("sensor 必须是 dict")
     for key in ("enemy_frames", "enemy_dist", "robot_type", "max_hp"):
         if key not in sensor:                      # 第 3 种：缺字段
             raise ValueError("sensor 缺少必需字段: " + key)
-
-    if not isinstance(state, SentryState):         # 第 2 种：非法 state
+    
+    #检验状态是否合法
+    if not isinstance(state, SentryState):        
         raise ValueError("state 必须是 SentryState 成员")
-
+    
+    #检验enemy_frames的value是否合法
     frames_raw = sensor["enemy_frames"]
-    # 只接受 tuple / list（题面明示）；空 或 长度>6 属契约外
     if not isinstance(frames_raw, (tuple, list)):
-        raise ValueError("enemy_frames 必须是 tuple 或 list")
-    if len(frames_raw) == 0 or len(frames_raw) > 6:  # 第 1 种：空 / 超长
+        raise ValueError("enemy_frames 是 tuple 或 list")
+    if len(frames_raw) == 0 or len(frames_raw) > 6:  
         raise ValueError("enemy_frames 长度必须在 1-6")
 
-    # =====================================================================
-    # 1. 防御式规范化：字段存在但取值非法 → 归一化，绝不抛异常
-    # =====================================================================
-    # enemy_frames：元素一律"按真值解释"（非布尔值也可以，如 1/0/""/None）
+    #规范frame的布尔值
     frames = tuple(bool(f) for f in frames_raw)
-    visible = frames[-1]                 # 术语"可见" = 当前帧（末位）为真
+    
+    visible = frames[-1]                
 
-    # enemy_dist：契约是 int 或 None；非数值一律归一为 None（视为"未知/远"）
+    #规范enemy_dist的整数
     dist_raw = sensor["enemy_dist"]
     if dist_raw is None or isinstance(dist_raw, bool):
         # bool 是 int 的子类，但语义上不是"距离"，一并归一为 None
@@ -498,20 +494,18 @@ def decide(sensor, state, hp, heat):
     elif isinstance(dist_raw, int):
         enemy_dist = dist_raw
     elif isinstance(dist_raw, float):
-        enemy_dist = int(dist_raw)       # 浮点距离截断成整数
+        enemy_dist = int(dist_raw)   
     else:
-        try:                             # 形如 "3" 的数字字符串也接受
+        try:                            
             enemy_dist = int(str(dist_raw).strip())
         except (TypeError, ValueError):
-            enemy_dist = None            # 形如 "far" → 未知
+            enemy_dist = None           
 
-    # robot_type：契约是 "INFANTRY" / "HERO"；其余（含大小写/非字符串）
-    # 一律按"步兵"处理——因为规则里只有 HERO 是特殊分支，非 HERO 都归步兵
+    # 规范robot_type的类型
     type_raw = sensor["robot_type"]
-    is_hero = (isinstance(type_raw, str)
-               and type_raw.strip().upper() == "HERO")
+    is_hero = isinstance(type_raw, str) and type_raw.strip().upper() == "HERO"
 
-    # hp_pct：0-100 的整数。转不成 int 就取安全默认值，绝不抛异常
+    # 规范整数的函数
     def to_int(value, default):
         try:
             return int(value)
@@ -522,63 +516,55 @@ def decide(sensor, state, hp, heat):
     hp_i = to_int(hp, 0)                       # 血量非法 → 默认 0
 
     if max_hp_i > 0:
-        # 正常情况：复用 Q1 的 hp_ratio（负血截 0、超量截 100）
+        # 复用 Q1 的 hp_ratio
         hp_pct = hp_ratio(hp_i, max_hp_i)
     else:
         # 满血非法（会除零）：有血视为满血，无血视为 0
         hp_pct = 100 if hp_i > 0 else 0
 
-    # 交火分支的公共判定：敌距 <= 3 为"贴身"，可直接开火；
-    # 敌距为 None（未知）时不算贴身，走"侧移逼近"分支
+    # 交火分支的公共判定：敌距 <= 3 为"贴身"，直接开火；
+    # 敌距为 None（未知）时不算贴身
     close_range = (enemy_dist is not None and enemy_dist <= 3)
 
+    # 交火分支的公共函数
     def engage_action():
-        """R4 与 R6 中"贴身/远距"两分支完全一致，抽出来复用。"""
         if close_range:
             return "SHOOT"                       # 敌距 <= 3：开火
-        # 敌距 > 3：HERO 往右、步兵往左包抄
         return "MOVE_RIGHT" if is_hero else "MOVE_LEFT"
 
-    # =====================================================================
-    # 2. 按 R1 → R7 顺序求值，首条命中即 return
-    # =====================================================================
-    # --- R1 保命优先：血量不足三成，无条件撤退（压过一切，包括贴脸交火）---
     if hp_pct <= 30:
         return ("RETREAT", SentryState.RETREAT)
 
-    # --- R2 撤退保持：已在撤退中 ---
+   
+   
+   
+   
+   #判断状态，并作出对应行动
     if state == SentryState.RETREAT:
-        # 注意：R1 已经拦下所有 hp_pct<=30，走到这里必然 hp_pct>30，
-        # 即"已恢复到安全血量"，于是转出撤退进入 RETURN。
-        # （else 分支在逻辑上不可达，仍保留以忠实还原规则表原意）
         if hp_pct > 30:
             return ("RETURN", SentryState.RETURN)
         return ("RETREAT", SentryState.RETREAT)
 
-    # --- R3 返航单帧：RETURN 是单帧过渡态，与可见性/敌距/热量无关 ---
+    
     if state == SentryState.RETURN:
         return ("MOVE_BASE", SentryState.PATROL)
 
-    # --- R4 / R5：state == ENGAGE，只看"这一帧有没有看见" ---
+    
     if state == SentryState.ENGAGE:
         # R4 看得见 → 按距离/机型出手，保持 ENGAGE
         if visible:
             return (engage_action(), SentryState.ENGAGE)
-        # R5 看不见 → 连续两帧丢失才放弃(SCAN)，只丢当前帧则待命
-        # （当前帧必为假，所以"连续丢失"等价于前一帧也为假）
         if len(frames) >= 2 and not frames[-2]:
             return ("SCAN", SentryState.SUSPECT)
         return ("HOLD_FIRE", SentryState.ENGAGE)
 
-    # --- R6 / R7：此处 state 只剩 PATROL / SUSPECT ---
+ 
     if visible:
-        # R6 看得见 → 连续两帧为真才算真敌情，否则当噪声(SCAN)
-        # （外层已保证 frames[-1] 为真，故只需再确认前一帧）
         if len(frames) >= 2 and frames[-2]:
             return (engage_action(), SentryState.ENGAGE)
         return ("SCAN", SentryState.SUSPECT)
 
-    # R7 看不见 → PATROL 继续巡逻，SUSPECT 继续扫描
+   
     if state == SentryState.PATROL:
         return ("PATROL_MOVE", SentryState.PATROL)
     return ("SCAN", SentryState.SUSPECT)
@@ -588,14 +574,194 @@ def decide(sensor, state, hp, heat):
 # Q6 巡逻任务（题面 Q6·巡逻契约与验收阈值）
 # ---------------------------------------------------------------------------
 def run_patrol(grid, max_steps=500):
-    """TODO(Q6)：sense → decide → act 主循环；
-    循环结构、终止条件、脱困自由度与统计返回契约见题面 Q6 规范。"""
-    raise NotImplementedError("Q6 run_patrol：题面 Q6·主循环与统计契约")
+    """Q6：把 Q3 的载体物理 + Q4 的贪心导航，组装成完整任务循环。
+
+    每轮：sense（读载体状态）→ decide（选方向 / 是否脱困）→ act（先对齐朝向，
+    再 move_forward）。终止条件：抵达 grid.enemy_pos / 步数用尽 / 电量耗尽。
+
+    返回契约（键与类型固定，题面 Q6 规范 5）：
+        {"steps": int, "collisions": int, "visited_count": int,
+         "found_enemy": bool, "success": bool}
+
+    策略总览（题面 Q6 规范 1）：
+        - 平时用 Q4 的 next_step_toward 贪心选方向；
+        - 当贪心"失速"（没有任何方向能让曼哈顿距离严格变小）时，切入
+          【沿墙走】脱困模式：贴着某一侧的墙一直挪，绕出死角；
+        - 当距离重新可缩短时，切回贪心。
+
+    下面已给出完整骨架 + 可直接用的工具函数；
+    【挖空 ①~④】是本功能的核心决策点，留给你写（记得删掉 raise 那行）。
+    """
+    target = grid.enemy_pos
+
+    # ==================== 工具函数（已写好，直接用） ====================
+    def manhattan(a, b):
+        """两格间的曼哈顿距离（Q4 用的度量）。"""
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    def has_greedy_candidate(pos):
+        """当前格是否还存在"能让距离严格变小"的可走方向。
+
+        与 Q4 的差别：这里把【越界】也算走不通（用 grid.is_blocked，
+        它同时判断障碍与越界），所以它同时回答"贪心还能不能推进"。
+        """
+        cur = manhattan(pos, target)
+        for f in Facing:
+            d = f.delta
+            nxt = (pos[0] + d[0], pos[1] + d[1])
+            if not grid.is_blocked(*nxt) and manhattan(nxt, target) < cur:
+                return True
+        return False
+
+    def rotate_to(f):
+        """把朝向旋转到 f（能一步左转就左转，否则一路右转）。
+
+        纯转向：不移动、不耗电。act 阶段先对齐朝向，再 move_forward。
+        """
+        rights = {Facing.UP: 0, Facing.RIGHT: 1, Facing.DOWN: 2, Facing.LEFT: 3}
+        diff = (rights[f] - rights[grid.facing]) % 4
+        if diff == 3:          # 左转 1 次比右转 3 次更省动作
+            grid.turn_left()
+        else:
+            for _ in range(diff):
+                grid.turn_right()
+
+    # 沿墙走要用的"左 / 右手邻居"查找表：
+    #   左转 = 逆时针 90°，右转 = 顺时针 90°。
+    left_of = {Facing.UP: Facing.LEFT, Facing.LEFT: Facing.DOWN,
+               Facing.DOWN: Facing.RIGHT, Facing.RIGHT: Facing.UP}
+    right_of = {v: k for k, v in left_of.items()}
+
+    # ==================== 状态变量 ====================
+    steps = 0                      # 已执行的动作数（= move_forward 的次数）
+    visited = {grid.current_pos}   # 走过的格子（去重后用于 visited_count）
+    wall = False                   # 是否处于"沿墙脱困"模式
+    hand = "L"                     # 贴哪只手走："L"=左手贴墙，"R"=右手贴墙
+    wall_steps = 0                 # 本次脱困已走的步数（绕圈超时用）
+    entry_dist = 0                 # 进入脱困时到目标的距离（切回贪心用）
+
+    # ==================== 主循环 ====================
+    while steps < max_steps and grid.fuel > 0 and not grid.found_enemy:
+        pos = grid.current_pos                       # sense：读载体状态
+
+        # ---- decide 第 1 步：要不要【进入】沿墙脱困？ ----
+        # 贪心失速 = 当前格没有任何方向能让曼哈顿距离严格变小。
+        if (not wall) and (not has_greedy_candidate(pos)):
+            # ✍️ 挖空 ①：初始化脱困模式（约 4 行）
+            #    wall           → True（进入脱困）
+            #    hand           → "L"（先试左手贴墙）
+            #    wall_steps     → 0（本次脱困重新计时）
+            #    entry_dist     → manhattan(pos, target)（记下入口距离，
+            #                      用来判断之后是否"绕出来了、比入口更近"）
+            wall = True
+            hand = "L"
+            wall_steps = 0
+            entry_dist = manhattan(pos, target)
+
+        # ---- decide 第 2 步：本步朝哪走？ ----
+        if wall:
+            # 沿墙走：贴着 hand 那一侧的墙挪。
+            #   side     = 贴墙那一侧的相邻朝向
+            #   opposite = side 的反方向（判断掉头用）
+            side = left_of[grid.facing] if hand == "L" else right_of[grid.facing]
+            opposite = (right_of[grid.facing] if hand == "L"
+                        else left_of[grid.facing])
+
+            def cell(f):
+                """朝向 f 的相邻格坐标。"""
+                d = f.delta
+                return (pos[0] + d[0], pos[1] + d[1])
+
+            # ✍️ 挖空 ②：沿墙的转向决策（本题最大的坑——转向顺序写反就废）
+            #    按顺序判断三种情形：
+            #      (a) 侧边没堵 → 朝侧边转（左手贴墙用 turn_left，
+            #                       右手贴墙用 turn_right），然后贴墙挪；
+            #      (b) 否则若【正前方】被堵 →
+            #            若 opposite 侧没堵 → 朝它拐（turn_right / turn_left）；
+            #            连 opposite 也堵（钻进死角）→ 原地掉头 180°（右转两次）；
+            #      (c) 否则（前方没堵）→ 什么都不做，保持朝向前进。
+            #    提示：turn_left()/turn_right() 只改朝向并返回新朝向。
+            if not grid.is_blocked(*cell(side)):
+                # (a) 侧边空 → 朝侧边转，然后贴墙挪
+                if hand == "L":
+                    grid.turn_left()
+                else:
+                    grid.turn_right()
+            elif grid.is_blocked(*cell(grid.facing)):
+                # (b) 前方堵 → 能拐就拐，拐不了（死角）就掉头
+                if not grid.is_blocked(*cell(opposite)):
+                    if hand == "L":
+                        grid.turn_right()
+                    else:
+                        grid.turn_left()
+                else:
+                    grid.turn_right()      # 原地转 180°
+                    grid.turn_right()
+            # (c) 否则前方没堵 → 什么都不做，保持朝向前进
+        else:
+            # 贪心：Q4 给一个方向，再把朝向对齐过去。
+            direction = next_step_toward(pos, target, grid.obstacles,
+                                         grid.facing)
+            rotate_to(direction)
+
+        # ---- act：对齐朝向之后，前进一格 ----
+        grid.move_forward()
+        steps += 1
+        visited.add(grid.current_pos)
+
+        # ---- 脱困模式的维护 ----
+        if wall:
+            wall_steps += 1
+            limit = grid.width + grid.height   # 绕圈超时阈值（题面允许自定）
+
+            # ✍️ 挖空 ③：绕圈太久 → 换手 / 放弃脱困
+            #    贴一只手走太久还出不去，多半是这只手贴错了墙：
+            #      - 若 hand == "L" 且 wall_steps > limit：
+            #            换成 "R"，并把 wall_steps 归零；
+            #      - 否则若 wall_steps > 2 * limit：
+            #            放弃脱困，wall = False（切回贪心再试）。
+            #
+            # ✍️ 挖空 ④：绕出来了 → 切回贪心
+            #    判据：当前位置既能贪心推进、又比【入口距离】更近了：
+            #      elif has_greedy_candidate(grid.current_pos) and \
+            #           manhattan(grid.current_pos, target) < entry_dist + 1:
+            #          wall = False
+            if wall_steps > limit and hand == "L":
+                hand = "R"               # 左手贴错了墙 → 换右手
+                wall_steps = 0
+            elif wall_steps > 2 * limit:
+                wall = False             # 绕太久，放弃脱困，切回贪心
+            elif (has_greedy_candidate(grid.current_pos)
+                  and manhattan(grid.current_pos, target) < entry_dist + 1):
+                wall = False             # 贪心重新可推进且比入口更近 → 绕出来了
+
+    # ==================== 收尾：按契约返回统计 ====================
+    # visited_count 的"去过多少格"题面未钉死，这里取【去重后的格子数】：
+    # 含起点、同格多次只算一次。保持确定性即可。
+    return {
+        "steps": steps,
+        "collisions": grid.collision_count,
+        "visited_count": len(visited),
+        "found_enemy": grid.found_enemy,
+        "success": grid.found_enemy,        # 与 found_enemy 同义
+    }
 
 
 def report_to_json(stats):
-    """TODO(Q6)：把 stats 序列化为确定性的 JSON 字符串，见题面 Q6 规范。"""
-    raise NotImplementedError("Q6 report_to_json：题面 Q6·报告序列化")
+    """把统计字典序列化为【确定性】的 JSON 字符串（题面 Q6 规范 6）。
+
+    确定性 = 同样的 stats 永远得到字节级相同的字符串。
+    为此序列化参数必须固定：键顺序、分隔符、非 ASCII 处理、数值格式。
+
+    ✍️ 挖空 ⑤：给 json.dumps 选出"确定性"的参数。
+       提示：
+         - sort_keys=True         → 键按字典序输出，不依赖 dict 插入顺序
+         - separators=(",", ":")  → 去掉默认多余空格，输出紧凑且固定
+         - ensure_ascii 选 True/False 都行，但要固定（本题键值全 ASCII）
+    验收方式：自动测试多半是"两次调用结果相等 + 能 json.loads 还原"，
+    所以只要参数固定、别混入 NaN/Infinity 之类的非标准值即可。
+    """
+    return json.dumps(stats, sort_keys=True, separators=(",", ":"))
 
 
 # ---------------------------------------------------------------------------
