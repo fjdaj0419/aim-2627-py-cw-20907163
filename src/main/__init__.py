@@ -650,8 +650,37 @@ def report_to_json(stats):
 # Bonus：BFS 全局最短路（题面 Bonus·BFS 语义与排行榜）
 # ---------------------------------------------------------------------------
 def bfs_path_length(start, target, obstacles):
-    """TODO(Bonus)：BFS 全局最短路步数；返回语义与边界职责见题面 Bonus 规范。"""
-    raise NotImplementedError("Bonus bfs_path_length")
+    """BFS 全局最短路步数；返回语义与边界职责见题面 Bonus 规范。
+
+    语义：
+      - start == target 时返回 0；
+      - 目标不可达时返回 -1。
+    职责约定：obstacles 已由调用方包含地图边界，因此对不可达目标的搜索
+    会在访问完所有可达格之后自然终止。
+    """
+    from collections import deque
+
+    start = (int(start[0]), int(start[1]))
+    target = (int(target[0]), int(target[1]))
+
+    if start == target:
+        return 0
+
+    obs = set(obstacles)
+    queue = deque([(start, 0)])
+    seen = {start}
+
+    while queue:
+        (x, y), dist = queue.popleft()
+        for nxt in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if nxt in obs or nxt in seen:
+                continue
+            if nxt == target:
+                return dist + 1
+            seen.add(nxt)
+            queue.append((nxt, dist + 1))
+
+    return -1
 
 
 # ---------------------------------------------------------------------------
