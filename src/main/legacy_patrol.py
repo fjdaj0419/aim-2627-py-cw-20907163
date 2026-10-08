@@ -29,7 +29,9 @@ def total_route_meters(points):
     points 为检查点序列 [(x, y), ...]，至少两个点。"""
     distance_in_meters = 0
     for i in range(len(points) - 1):
-        distance_in_meters += segment_length_cm(points[i], points[i + 1])
+        # [Bug 1 修复] segment_length_cm 返回的是厘米，契约要求以"米"返回；
+        # 旧实现漏除 100，导致结果整体放大 100 倍。
+        distance_in_meters += segment_length_cm(points[i], points[i + 1]) / 100
     return distance_in_meters
 
 
@@ -59,6 +61,11 @@ def calibrate(samples):
     """以第一个正样本为基线计算累计漂移：sum(s - baseline)。
     样本为空或没有正样本时，漂移为 0。"""
     baseline = first_positive(samples)
+    # [Bug 2 修复] 当 samples 为空或全为非正数时，first_positive 返回 None；
+    # 契约明确"漂移为 0"。若不守卫，下面的 `s - None` 会抛 TypeError，
+    # 隐藏测试会直接覆盖这条路径（旧实现一遇空/全负样本就崩）。
+    if baseline is None:
+        return 0
     drift = 0
     for s in samples:
         drift += s - baseline
@@ -75,15 +82,25 @@ def summarize_events(events, max_id):
     used = 0
     steps = 0
     for e in events:
-        if e["id"] < max_id:
+        # [Bug 3 修复] 契约写"id 不超过 max_id"，即 ≤；旧实现 < 漏掉了
+        # id == max_id 的事件。注意与 Bug 2 互为"遮蔽对"：不修这里，
+        # 包含全负 samples 的事件不会被统计，bug 2 不会被触发；只修
+        # 这里不修 bug 2，又会在含全负样本的事件上抛 TypeError。
+        if e["id"] <= max_id:
             used += 1
             steps += e["move"] + calibrate(e["samples"])
     return {"events": used, "steps": steps}
 
 
-def log(message, history=[]):
+def log(message, history=None):
     """向历史追加一条日志并返回整个历史列表。
     不显式传入 history 时，每次调用都从空历史开始。"""
+    # [Bug 4 修复] 原形参 `history=[]` 是 Python 经典的"可变默认参数"陷阱：
+    # 列表对象在函数定义时只创建一次，之后所有不传 history 的调用都会复用
+    # 同一个列表，结果日志相互串味（log("a") 返回 ["a"]，再 log("b") 变
+    # ["a","b"]）。契约要求"每次调用都从空历史开始"，这里改用 None 哨兵。
+    if history is None:
+        history = []
     history.append(message)
     return history
 
@@ -109,6 +126,15 @@ def run_legacy_sim(rounds, stamina_start=100):
         if round_ >= 3:
             stamina -= 5
         trace.append((round_, stamina))
-        if stamina > 20:
+        # [Bug 5 修复] 契约"任一轮结束后体力 <= 20 时立即终止"。
+        # 旧实现 `if stamina > 20: break` 把方向写反了，永远不会跳出。
+        # 注意此 Bug 与下面的 Bug 6 互为"遮蔽对"：旧代码因 round_ 不
+        # 自增，循环不会正常推进，所以"break 方向错"也不会无限跑；
+        # 单独修任意一个都会立刻暴露另一个。
+        if stamina <= 20:
             break
+        # [Bug 6 修复] while 循环里 round_ 从未自增，跑到这里又一次会
+        # 立刻因 `round_ < rounds` 永远成立而停不下来；只有当 Bug 5 的
+        # break 命中时才会退出，所以旧实现任何调用都最多返回 1 轮。
+        round_ += 1
     return {"rounds": len(trace), "stamina": stamina, "trace": trace}
