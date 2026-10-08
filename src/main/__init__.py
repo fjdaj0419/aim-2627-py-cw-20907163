@@ -135,7 +135,7 @@ def analyze_damage_log(lines):
                 # 计入统计
                 total = total + damage
                 # 记录每一个部位的伤害值
-                by_armor[armor] += damage# 记录每一个部位的伤害值
+                by_armor[armor] += damage  # 记录每一个部位的伤害值
                 event_count += 1
 
             # ============================================================
@@ -327,7 +327,7 @@ class SentryGrid:
         left_map = {
             Facing.UP: Facing.LEFT,    # 上 → 左
             Facing.LEFT: Facing.DOWN,  # 左 → 下
-            Facing.DOWN: Facing.RIGHT, # 下 → 右
+            Facing.DOWN: Facing.RIGHT,  # 下 → 右
             Facing.RIGHT: Facing.UP,   # 右 → 上
         }
         # 更新朝向
@@ -469,24 +469,24 @@ def decide(sensor, state, hp, heat):
     for key in ("enemy_frames", "enemy_dist", "robot_type", "max_hp"):
         if key not in sensor:                      # 第 3 种：缺字段
             raise ValueError("sensor 缺少必需字段: " + key)
-    
-    #检验状态是否合法
-    if not isinstance(state, SentryState):        
+
+    # 检验状态是否合法
+    if not isinstance(state, SentryState):
         raise ValueError("state 必须是 SentryState 成员")
-    
-    #检验enemy_frames的value是否合法
+
+    # 检验enemy_frames的value是否合法
     frames_raw = sensor["enemy_frames"]
     if not isinstance(frames_raw, (tuple, list)):
         raise ValueError("enemy_frames 是 tuple 或 list")
-    if len(frames_raw) == 0 or len(frames_raw) > 6:  
+    if len(frames_raw) == 0 or len(frames_raw) > 6:
         raise ValueError("enemy_frames 长度必须在 1-6")
 
-    #规范frame的布尔值
+    # 规范frame的布尔值
     frames = tuple(bool(f) for f in frames_raw)
-    
-    visible = frames[-1]                
 
-    #规范enemy_dist的整数
+    visible = frames[-1]
+
+    # 规范enemy_dist的整数
     dist_raw = sensor["enemy_dist"]
     if dist_raw is None or isinstance(dist_raw, bool):
         # bool 是 int 的子类，但语义上不是"距离"，一并归一为 None
@@ -494,12 +494,12 @@ def decide(sensor, state, hp, heat):
     elif isinstance(dist_raw, int):
         enemy_dist = dist_raw
     elif isinstance(dist_raw, float):
-        enemy_dist = int(dist_raw)   
+        enemy_dist = int(dist_raw)
     else:
-        try:                            
+        try:
             enemy_dist = int(str(dist_raw).strip())
         except (TypeError, ValueError):
-            enemy_dist = None           
+            enemy_dist = None
 
     # 规范robot_type的类型
     type_raw = sensor["robot_type"]
@@ -535,21 +535,15 @@ def decide(sensor, state, hp, heat):
     if hp_pct <= 30:
         return ("RETREAT", SentryState.RETREAT)
 
-   
-   
-   
-   
-   #判断状态，并作出对应行动
+   # 判断状态，并作出对应行动
     if state == SentryState.RETREAT:
         if hp_pct > 30:
             return ("RETURN", SentryState.RETURN)
         return ("RETREAT", SentryState.RETREAT)
 
-    
     if state == SentryState.RETURN:
         return ("MOVE_BASE", SentryState.PATROL)
 
-    
     if state == SentryState.ENGAGE:
         # R4 看得见 → 按距离/机型出手，保持 ENGAGE
         if visible:
@@ -558,13 +552,11 @@ def decide(sensor, state, hp, heat):
             return ("SCAN", SentryState.SUSPECT)
         return ("HOLD_FIRE", SentryState.ENGAGE)
 
- 
     if visible:
         if len(frames) >= 2 and frames[-2]:
             return (engage_action(), SentryState.ENGAGE)
         return ("SCAN", SentryState.SUSPECT)
 
-   
     if state == SentryState.PATROL:
         return ("PATROL_MOVE", SentryState.PATROL)
     return ("SCAN", SentryState.SUSPECT)
@@ -618,7 +610,8 @@ def run_patrol(grid, max_steps=500):
 
         纯转向：不移动、不耗电。act 阶段先对齐朝向，再 move_forward。
         """
-        rights = {Facing.UP: 0, Facing.RIGHT: 1, Facing.DOWN: 2, Facing.LEFT: 3}
+        rights = {Facing.UP: 0, Facing.RIGHT: 1,
+                  Facing.DOWN: 2, Facing.LEFT: 3}
         diff = (rights[f] - rights[grid.facing]) % 4
         if diff == 3:          # 左转 1 次比右转 3 次更省动作
             grid.turn_left()
@@ -642,7 +635,7 @@ def run_patrol(grid, max_steps=500):
 
     # ==================== 主循环 ====================
     while steps < max_steps and grid.fuel > 0 and not grid.found_enemy:
-        pos = grid.current_pos                       # sense：读载体状态
+        pos = grid.current_pos  # sense：读载体状态
 
         # ---- decide 第 1 步：要不要【进入】沿墙脱困？ ----
         # 贪心失速 = 当前格没有任何方向能让曼哈顿距离严格变小。
